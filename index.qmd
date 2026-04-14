@@ -1,0 +1,178 @@
+---
+title: "Postnatal Care Around the World"
+author: "Amal Mathew"
+date: today
+format:
+  html:
+    embed-resources: true
+    code-fold: true
+    theme: flatly
+    toc: true
+execute:
+  warning: false
+  echo: true
+---
+
+## Introduction
+
+Every mother deserves care after giving birth. Yet across the world, millions of women go without postnatal care in the critical first 48 hours.
+
+This report explores **global patterns in postnatal care for mothers**, using UNICEF data on the percentage of women aged 15-49 who received postnatal care within two days of giving birth.
+
+Key questions we explore:
+
+- Which countries have the lowest coverage?
+- Which countries have improved the most?
+- What does the global trend look like?
+
+---
+
+## The Data
+
+```{python}
+#| label: load-data
+
+import polars as pl
+import pandas as pd
+from plotnine import *
+
+df = pl.read_csv("unicef_indicator_1.csv")
+
+df_clean = df.select([
+    pl.col("country"),
+    pl.col("alpha_3_code"),
+    pl.col("time_period").alias("year"),
+    pl.col("obs_value").alias("postnatal_pct")
+]).drop_nulls()
+
+print(f"Countries: {df_clean['country'].n_unique()}")
+print(f"Years: {df_clean['year'].min()} to {df_clean['year'].max()}")
+```
+
+---
+
+## World Map
+
+The map below shows the most recent postnatal care rate for each country. **Red means low coverage, green means high coverage.**
+
+```{python}
+#| label: fig-map
+#| fig-cap: "Postnatal Care Coverage by Country"
+
+import geopandas as gpd
+
+df_latest = (
+    df_clean
+    .sort("year", descending=True)
+    .unique(subset=["country"], keep="first")
+    .to_pandas()
+)
+
+world = gpd.read_file(
+    "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson"
+)
+
+world_merged = world.merge(
+    df_latest, left_on="ADM0_A3", right_on="alpha_3_code", how="left"
+)
+
+(
+    ggplot(world_merged)
+    + geom_map(aes(fill="postnatal_pct"))
+    + scale_fill_gradient(low="#d73027", high="#1a9850", na_value="lightgrey", name="Coverage %")
+    + theme_void()
+    + theme(figure_size=(12, 6))
+    + labs(title="Postnatal Care Coverage Worldwide")
+)
+```
+
+---
+
+## Top and Bottom Countries
+
+```{python}
+#| label: fig-bar
+#| fig-cap: "Countries with Highest and Lowest Postnatal Care Coverage"
+
+df_latest_pd = (
+    df_clean
+    .sort("year", descending=True)
+    .unique(subset=["country"], keep="first")
+    .to_pandas()
+)
+
+bottom10 = df_latest_pd.nsmallest(10, "postnatal_pct").copy()
+top10 = df_latest_pd.nlargest(10, "postnatal_pct").copy()
+bottom10["group"] = "Lowest"
+top10["group"] = "Highest"
+
+combined = pd.concat([bottom10, top10])
+
+(
+    ggplot(combined, aes(x="reorder(country, postnatal_pct)", y="postnatal_pct", fill="group"))
+    + geom_col()
+    + coord_flip()
+    + scale_fill_manual(values={"Lowest": "#d73027", "Highest": "#1a9850"})
+    + theme_minimal()
+    + theme(figure_size=(10, 7))
+    + labs(title="Highest and Lowest Postnatal Care Countries", x="Country", y="Coverage (%)")
+)
+```
+
+---
+
+## Global Trend Over Time
+
+```{python}
+#| label: fig-timeseries
+#| fig-cap: "Average Global Postnatal Care Rate Over Time"
+
+df_trend = (
+    df_clean
+    .group_by("year")
+    .agg(pl.col("postnatal_pct").mean().alias("avg_pct"))
+    .sort("year")
+    .to_pandas()
+)
+
+(
+    ggplot(df_trend, aes(x="year", y="avg_pct"))
+    + geom_line(color="#2166ac", size=1.2)
+    + geom_point(color="#2166ac", size=3)
+    + theme_minimal()
+    + theme(figure_size=(10, 5))
+    + labs(title="Average Postnatal Care Coverage Over Time", x="Year", y="Average Coverage (%)")
+)
+```
+
+---
+
+## Coverage vs Year
+
+```{python}
+#| label: fig-scatter
+#| fig-cap: "Postnatal Care Rate vs Year with Trend Line"
+
+df_pd = df_clean.to_pandas()
+
+(
+    ggplot(df_pd, aes(x="year", y="postnatal_pct"))
+    + geom_point(alpha=0.4, color="#4393c3", size=2)
+    + geom_smooth(method="lm", color="#d6604d")
+    + theme_minimal()
+    + theme(figure_size=(10, 6))
+    + labs(title="Postnatal Care Rate vs Year", x="Year", y="Coverage (%)")
+)
+```
+
+---
+
+## Conclusion
+
+This data tells an important story:
+
+- **Some countries** like Turkmenistan and Belarus have nearly **100% coverage**
+- **Other countries** like Chad and South Sudan are below **20%**
+- **The global trend is improving** but millions of mothers still lack basic care
+
+*Data source: UNICEF Global Database - Postnatal Care for Mothers*
